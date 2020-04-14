@@ -1,31 +1,47 @@
 #include "main.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include "stm32f0xx.h"
+#include "GYRO.h"
 
+SPI_HandleTypeDef hspi2;
+
+UART_HandleTypeDef huart4;
+
+/* USER CODE BEGIN PV */
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-void GPIO_Init(void);
-void GYRO_Init(void);
-void SPI_Init(void);
+static void MX_GPIO_Init(void);
+static void MX_SPI2_Init(void);
+static void MX_USART4_UART_Init(void);
+/* USER CODE BEGIN PFP */
 
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/**
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
   HAL_Init();
   SystemClock_Config();
-	GPIO_Init();
-	SPI_Init();
-	GYRO_Init();
+  MX_GPIO_Init();
+  MX_SPI2_Init();
+  MX_USART4_UART_Init();
 
   while (1)
   {
-    
+
   }
+
 }
 
-/**
-  * @brief System Clock Configuration
-  * @retval None
-  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
@@ -58,10 +74,103 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+static void MX_SPI2_Init(void)
+{
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 7;
+  hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+}
+
+
+static void MX_USART4_UART_Init(void)
+{
+  huart4.Instance = USART4;
+  huart4.Init.BaudRate = 38400;
+  huart4.Init.WordLength = UART_WORDLENGTH_8B;
+  huart4.Init.StopBits = UART_STOPBITS_1;
+  huart4.Init.Parity = UART_PARITY_NONE;
+  huart4.Init.Mode = UART_MODE_TX_RX;
+  huart4.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart4.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart4.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart4.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
+
+
+static void MX_GPIO_Init(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+  /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(NCS_MEMS_SPI_GPIO_Port, NCS_MEMS_SPI_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin : NCS_MEMS_SPI_Pin */
+  GPIO_InitStruct.Pin = NCS_MEMS_SPI_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(NCS_MEMS_SPI_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : MEMS_INT1_Pin MEMS_INT2_Pin */
+  GPIO_InitStruct.Pin = MEMS_INT1_Pin|MEMS_INT2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_EVT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PA0 PA1 PA2 PA3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF2_TIM2;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PC6 PC7 PC8 PC9 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6|GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF0_TIM3;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : PB5 PB6 PB7 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5|GPIO_PIN_6|GPIO_PIN_7;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+}
+
+
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -69,95 +178,7 @@ void Error_Handler(void)
 
   /* USER CODE END Error_Handler_Debug */
 }
-void GPIO_Init(void)
-{
-	// Clock Enable: GPIOA/B/C
-	RCC->AHBENR |= RCC_AHBENR_GPIOAEN|RCC_AHBENR_GPIOBEN|RCC_AHBENR_GPIOCEN;
 
-	/* INITIALIZE PINS
-	 * PA0: TIM2_CH1_ETR (AF2)
-	 * PA1: TIM2_CH2 (AF2)
-	 * PA2: TIM2_CH3 (AF2)
-	 * PA3: TIM2_CH4 (AF2)
-	 * PB5: LED - OUTPUT, PP, LOW
-	 * PB6: LED - OUTPUT, PP, LOW
-	 * PB7: LED - OUTPUT, PP, LOW
-	 * PB13: SPI2_SCK (AF0)
-	 * PB14: SPI2_MISO (AF0)
-	 * PB15: SPI2_MOSI (AF0)
-	 * PC0: CS - OUTPUT,PP,LOW
-	 * PC1: INT1 - INPUT
-	 * PC2: DRDY/INT2 - INPUT
-	 * PC6: TIM3_CH1 (AF0)
-	 * PC7: TIM3_CH2 (AF0)
-	 * PC8: TIM3_CH3 (AF0)
-	 * PC9: TIM3_CH4 (AF0)
-	 * PC10: USART4_TX (AF0)
-	 * PC11: USART4_RX (AF0)
-	 */
-	GPIOA->MODER |= GPIO_MODER_MODER0_1 | GPIO_MODER_MODER1_1 | GPIO_MODER_MODER2_1 | GPIO_MODER_MODER3_1;
-  GPIOB->MODER |= GPIO_MODER_MODER5_0 | GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER13_1
-									| GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1;
-	GPIOC->MODER |= GPIO_MODER_MODER0_0 | GPIO_MODER_MODER6_1 | GPIO_MODER_MODER7_1 | GPIO_MODER_MODER8_1
-									| GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
-
-	GPIOA->AFR[0] |= (0x2)|(0x2 << GPIO_AFRL_AFRL1_Pos)|(0x2 << GPIO_AFRL_AFRL2_Pos)|(0x2 << GPIO_AFRL_AFRL3_Pos);
-  GPIOB->AFR[1] &= ~(GPIO_AFRH_AFRH0 | GPIO_AFRH_AFRH5 | GPIO_AFRH_AFRH6 | GPIO_AFRH_AFRH7);
-	GPIOC->AFR[0] &= ~(GPIO_AFRL_AFRL6 | GPIO_AFRL_AFRL7);
-	GPIOC->AFR[1] &= ~(GPIO_AFRH_AFRH0 | GPIO_AFRH_AFRH1 | GPIO_AFRH_AFRH2 | GPIO_AFRH_AFRH3);
-
-}
-
-void GYRO_Init(void)
-{
-	// L3GD20HTR Initialization
-}
-
-void GYRO_Write(uint8_t TxData, uint8_t WriteAddr)
-{
-  // SPI Transmission Step 1: Bring CS (serial port enable) LOW
-  SPI2->CR1 &= ~(SPI_CR1_SPE);
-	
-	// SPI Transmission Step 2: Format and transmit data
-  uint8_t cmd[2] = {0x00 | WriteAddr, TxData};
-	uint8_t *pData = cmd;
-	uint8_t count = 2;
-	
-  while(count > 0)
-	{
-		if(SPI2->SR & SPI_SR_TXE)
-		{
-			SPI2->DR = *pData;
-			pData += sizeof(uint8_t);
-			count--;
-		}
-	}
-	// SPI Transmission Step 3: Bring CS (serial port enable) HIGH
-  SPI2->CR1 |= SPI_CR1_SPE;
-}
-
-void GYRO_Read(uint8_t* pBuffer,uint8_t ReadAddr, uint16_t NumByteToRead)
-{
-  // SPI Transmission Step 1: Bring CS (serial port enable) LOW
-  SPI2->CR1 &= ~(SPI_CR1_SPE);
-
-  // SPI Transmission Step 2: Format and read data
-
-  // SPI Transmission Step 3: Bring CS (serial port enable) HIGH
-  SPI2->CR1 |= SPI_CR1_SPE;
-}
-
-void SPI_Init(void)
-{
-	/* SPI Initialization
-	 * Default (Reset): CPOL (Low), CPHA (1st Edge), 8bit Data size, (tx/rx) 1st bit = MSB
-	 * CR1: Master, Baud Rate: fPCLK/16 (3MHz)
-	 * CR2: Enable interrupts (Error, RXNE, TXE)
-	 */
-	SPI2->CR1 = SPI_CR1_MSTR | (0x7 << SPI_CR1_BR_Pos);
-	SPI2->CR2 |= SPI_CR2_ERRIE | SPI_CR2_RXNEIE | SPI_CR2_TXEIE;
-	SPI2->CR1 |= SPI_CR1_SPE;
-}
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
