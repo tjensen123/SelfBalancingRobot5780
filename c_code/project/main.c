@@ -16,6 +16,11 @@ volatile uint16_t BT_Data = 0;				// Incoming BT data... may need formatting
 volatile int16_t xdata = 0;
 volatile int16_t ydata = 0;
 volatile int16_t zdata = 0;
+int left = 4;                           //left speed
+int right = 4;				//right speed
+char data[5] = "L4R4:";			//bluetooth data
+char dataChar;				//bluetooth helper value
+int i = 0;				//bluetooth read index
 
 void SystemClock_Config(void);
 void GPIO_Init(void);
@@ -117,7 +122,7 @@ void GPIO_Init(void)
   GPIOB->MODER |= GPIO_MODER_MODER5_0 | GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER13_1
 									| GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1;
 	GPIOC->MODER |= GPIO_MODER_MODER0_0 | GPIO_MODER_MODER6_1 | GPIO_MODER_MODER7_1 | GPIO_MODER_MODER8_1
-									| GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
+							| GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
 
 	GPIOA->AFR[0] |= (0x2)|(0x2 << GPIO_AFRL_AFRL1_Pos)|(0x2 << GPIO_AFRL_AFRL2_Pos)|(0x2 << GPIO_AFRL_AFRL3_Pos);
   GPIOB->AFR[1] &= ~(GPIO_AFRH_AFRH0 | GPIO_AFRH_AFRH5 | GPIO_AFRH_AFRH6 | GPIO_AFRH_AFRH7);
@@ -263,6 +268,22 @@ int* GYRO_Read(int* RxData,uint8_t ReadAddr, uint16_t Bytes)
   SPI2->CR1 |= SPI_CR1_SPE;
 	
 	return RxData;
+}
+
+void processBTData(void){
+	if ((USART4->ISR & USART_ISR_RXNE) == USART_ISR_RXNE) //check if the ISR register is not empty
+	{
+		dataChar = (uint8_t)(USART4->RDR); // Receive data, clear flag
+		data[i] = dataChar; //store char
+		if(dataChar==':'){
+			i=0;//reset index
+			left = data[1]-48;//set left speed
+			right = data[3]-48;//set right speed
+		}
+		else{
+			i++;//increment index
+		}	
+	}
 }
 
 
