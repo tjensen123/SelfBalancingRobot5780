@@ -1,1 +1,12 @@
 
+# SelfBalancingRobot5780
+
+1. Connect Battery
+2. Start BT app
+3. Use BT app to control speed/direction
+
+* UTILIZING GYROSCOPE
+4. Controller
+  a) Board tilt controls speed/direction
+5. Mounted Balancer
+  a) Board reads in angular velocity and self corrects
