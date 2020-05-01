@@ -1,47 +1,92 @@
 #include "main.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include "stm32f0xx.h"
 
-volatile int16_t error_integral = 0;  // Integrated error signal
-volatile uint8_t duty_cycle = 0;    	// Output PWM duty cycle
-volatile int16_t target_rpm = 0;    	// Desired speed target
-volatile int16_t motor_speed = 0;   	// Measured motor speed
-volatile int8_t adc_value = 0;      	// ADC measured motor current
-volatile int16_t error = 0;         	// Speed error signal
-volatile uint8_t Kp = 1;            	// Proportional gain
-volatile uint8_t Ki = 1;            	// Integral gain
-volatile int16_t output = 0;					// PI output
-volatile uint16_t BT_Data = 0;				// Incoming BT data... may need formatting
-volatile int16_t xdata = 0;
-volatile int16_t ydata = 0;
-volatile int16_t zdata = 0;
-int left = 4;                           //left speed
-int right = 4;				//right speed
-char data[5] = "L4R4:";			//bluetooth data
-char dataChar;				//bluetooth helper value
-int i = 0;				//bluetooth read index
+SPI_HandleTypeDef hspi2;
 
 void SystemClock_Config(void);
 void GPIO_Init(void);
-void GYRO_Init(void);
 void SPI2_Init(void);
-void GYRO_Write(uint8_t TxData, uint8_t WriteAddr);
-int* GYRO_Read(int* pRxData,uint8_t ReadAddr, uint16_t Bytes);
+void USART4_Init(void);
+void TIMER_Init(void);
+void GYRO_Init(void);
 float GYRO_Read_X(float sensitivity);
 float GYRO_Read_Y(float sensitivity);
+void GYRO_Write(uint8_t TxData, uint8_t WriteAddr);
+void GYRO_Read(uint8_t* RxData,uint8_t ReadAddr, uint16_t Bytes);
+void R_Forward(uint16_t speed);
+void R_Reverse(uint16_t speed);
+void L_Forward(uint16_t speed);
+void L_Reverse(uint16_t speed);
+void R_Stop(void);
+void L_Stop(void);
+
+int left=4;
+int right=4;
+int storeLeft=4;
+int storeRight=4;
+volatile char data[5]= "L4R4:";
+volatile char dataChar;
+volatile int i = 0;
+volatile int16_t xdata = 0;
+volatile int16_t ydata = 0;
+float sensitivity_245 = 114.285f;
 
 int main(void)
 {
+
   HAL_Init();
   SystemClock_Config();
 	GPIO_Init();
-	SPI2_Init();
+  SPI2_Init();
+	USART4_Init();
 	GYRO_Init();
-
+	TIMER_Init();
+	uint8_t thresh = 10;
+	
+	uint8_t status[1];
+	GYRO_Read(status,0x27,1);
   while (1)
   {
-    
+		// New X-Data
+		if(*status & (1<<0)){
+			xdata = (int16_t)GYRO_Read_X(sensitivity_245);
+		}
+		// New Y-Data
+		if(*status & (1<<1)){
+			ydata = (int16_t)GYRO_Read_Y(sensitivity_245);
+		}
+	
+		// Falling Forward
+		if(xdata > thresh){
+			GPIOC->ODR &= ~(GPIO_ODR_8);
+			GPIOC->ODR |= GPIO_ODR_9;
+			R_Forward(xdata);
+			L_Forward(xdata);
+		}
+
+		// Falling Backward
+		else if(xdata < -thresh){
+			GPIOC->ODR &= ~(GPIO_ODR_9);
+			GPIOC->ODR |= GPIO_ODR_8;
+			R_Reverse(xdata*-1);
+			L_Reverse(xdata*-1);
+		}
+		
+		// Rotate Right
+		if(ydata > thresh){
+			GPIOC->ODR &= ~(GPIO_ODR_7);
+			GPIOC->ODR |= GPIO_ODR_6;
+			R_Reverse(ydata);
+			L_Forward(ydata);
+		}
+		
+		// Rotate Left
+		else if(ydata < -thresh){
+			GPIOC->ODR &= ~(GPIO_ODR_6);
+			GPIOC->ODR |= GPIO_ODR_7;
+			R_Forward(ydata*-1);
+			L_Reverse(ydata*-1);
+		}
+		else GPIOC->ODR = 0;
   }
 }
 
@@ -80,55 +125,45 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 }
-
-/**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
-void Error_Handler(void)
-{
-  /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-
-  /* USER CODE END Error_Handler_Debug */
-}
 void GPIO_Init(void)
 {
 	// Clock Enable: GPIOA/B/C
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN|RCC_AHBENR_GPIOBEN|RCC_AHBENR_GPIOCEN;
 
-	/* INITIALIZE PINS
-	 * PA0: TIM2_CH1_ETR (AF2)
-	 * PA1: TIM2_CH2 (AF2)
-	 * PA2: TIM2_CH3 (AF2)
-	 * PA3: TIM2_CH4 (AF2)
-	 * PB5: LED - OUTPUT, PP, LOW
-	 * PB6: LED - OUTPUT, PP, LOW
-	 * PB7: LED - OUTPUT, PP, LOW
-	 * PB13: SPI2_SCK (AF0)
-	 * PB14: SPI2_MISO (AF0)
-	 * PB15: SPI2_MOSI (AF0)
-	 * PC0: CS - OUTPUT,PP,LOW
-	 * PC1: INT1 - INPUT
-	 * PC2: DRDY/INT2 - INPUT
-	 * PC6: TIM3_CH1 (AF0)
-	 * PC7: TIM3_CH2 (AF0)
-	 * PC8: TIM3_CH3 (AF0)
-	 * PC9: TIM3_CH4 (AF0)
-	 * PC10: USART4_TX (AF0)
-	 * PC11: USART4_RX (AF0)
-	 */
-	GPIOA->MODER |= GPIO_MODER_MODER0_1 | GPIO_MODER_MODER1_1 | GPIO_MODER_MODER2_1 | GPIO_MODER_MODER3_1;
-  GPIOB->MODER |= GPIO_MODER_MODER5_0 | GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER13_1
-									| GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1;
-	GPIOC->MODER |= GPIO_MODER_MODER0_0 | GPIO_MODER_MODER6_1 | GPIO_MODER_MODER7_1 | GPIO_MODER_MODER8_1
-							| GPIO_MODER_MODER9_1 | GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
+//	// SPI2 - GYRO
+//	// SCK - PB13, MISO - PB14, MOSI - PB15 (AF0)
+//	// CS - PC0, INT1 - PC1, INT2 - PC2
+//  GPIOB->MODER |= GPIO_MODER_MODER13_1 | GPIO_MODER_MODER14_1 | GPIO_MODER_MODER15_1;
+//	GPIOB->OSPEEDR |= 0x3F << 26;
+	GPIOC->MODER |= GPIO_MODER_MODER0_0| GPIO_MODER_MODER1_1;
 
-	GPIOA->AFR[0] |= (0x2)|(0x2 << GPIO_AFRL_AFRL1_Pos)|(0x2 << GPIO_AFRL_AFRL2_Pos)|(0x2 << GPIO_AFRL_AFRL3_Pos);
-  GPIOB->AFR[1] &= ~(GPIO_AFRH_AFRH0 | GPIO_AFRH_AFRH5 | GPIO_AFRH_AFRH6 | GPIO_AFRH_AFRH7);
-	GPIOC->AFR[0] &= ~(GPIO_AFRL_AFRL6 | GPIO_AFRL_AFRL7);
-	GPIOC->AFR[1] &= ~(GPIO_AFRH_AFRH0 | GPIO_AFRH_AFRH1 | GPIO_AFRH_AFRH2 | GPIO_AFRH_AFRH3);
-
+	// USART4 - BLUETOOTH
+	GPIOC->MODER |= GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
+	
+	// LEDs
+	GPIOC->MODER |= GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER8_0 | GPIO_MODER_MODER9_0;
+	
+	// TIM1
+	// CH 1: PA8 (AF2)
+	// CH 2: PA9(AF2)
+	GPIOA->MODER |= GPIO_MODER_MODER8_1 | GPIO_MODER_MODER9_1;
+	GPIOA->AFR[1] |= (0x2)|(0x2 << GPIO_AFRL_AFRL1_Pos);	
+	
+	// TIM2
+	// CH 1: PA0 (AF2)
+	// CH 2: PA1 (AF2)
+	// CH 3: PB10 (AF2)
+	// CH 4: PB11 (AF2)
+	GPIOA->MODER |= GPIO_MODER_MODER0_1 | GPIO_MODER_MODER1_1;
+	GPIOA->AFR[0] |= (0x2)|(0x2 << GPIO_AFRL_AFRL1_Pos);
+	GPIOB->MODER |= GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
+	GPIOB->AFR[1] |= (0x2 << GPIO_AFRH_AFRH2_Pos)|(0x2 << GPIO_AFRH_AFRH3_Pos);
+	
+	// TIM3
+	// CH 1: PB4 (AF1)
+	// CH 2: PB5 (AF1)
+	GPIOB->MODER |= GPIO_MODER_MODER4_1 | GPIO_MODER_MODER5_1;
+	GPIOB->AFR[0] |= (0x1 << GPIO_AFRL_AFRL4_Pos)|(0x1 << GPIO_AFRL_AFRL5_Pos);
 }
 
 void SPI2_Init(void)
@@ -136,13 +171,33 @@ void SPI2_Init(void)
 	/* SPI2 Initialization
 	 * Enable Clock
 	 * Default (Reset): CPOL (Low), CPHA (1st Edge), 8bit Data size, (tx/rx) 1st bit = MSB
-	 * CR1: Master, Baud Rate: fPCLK/16 (3MHz)
+	 * CR1: Master, Baud Rate: fPCLK/8 (3MHz)
 	 * CR2: Enable interrupts (Error, RXNE, TXE)
-	 */
+	
 	RCC->APB1ENR |= RCC_APB1ENR_SPI2EN;
-	SPI2->CR1 = SPI_CR1_MSTR | (0x7 << SPI_CR1_BR_Pos);
+	
+	SPI2->CR1 = SPI_CR1_MSTR | SPI_CR1_BR_1 | SPI_CR1_SSM | SPI_CR1_SSI;
 	SPI2->CR2 |= SPI_CR2_ERRIE | SPI_CR2_RXNEIE | SPI_CR2_TXEIE;
 	SPI2->CR1 |= SPI_CR1_SPE;
+	*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 7;
+  hspi2.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+  hspi2.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
 }
 void USART4_Init(void)
 {
@@ -151,9 +206,9 @@ void USART4_Init(void)
 	 * Default (Reset): 
 	 */
 	RCC->APB1ENR |= RCC_APB1ENR_USART4EN;
-	USART4->BRR = HAL_RCC_GetHCLKFreq()/115200;
-	USART4->CR1 |= USART_CR1_RXNEIE;		// RX Interrupt Enabled
-	USART4->CR1 |= USART_CR1_RE | USART_CR1_TE | USART_CR1_UE;
+	USART4->BRR = HAL_RCC_GetHCLKFreq()/9600;
+	USART4->CR1 |= USART_CR1_RXNEIE | USART_CR1_RE | USART_CR1_TE;
+	USART4->CR1 |= USART_CR1_UE;
 	
 	NVIC_EnableIRQ(USART3_4_IRQn);	// Enable interrupt
 	NVIC_SetPriority(USART3_4_IRQn,1);	// Set priority
@@ -161,34 +216,168 @@ void USART4_Init(void)
 
 void GYRO_Init(void)
 {
-	/* Sets initial register values and finds a DC offset through calibration
-	*/
-	long x_cal,y_cal;
-	float sensitivity_250 = 114.285f; // Found value on the innernetz
-	
 	// L3GD20HTR Initialization
-	GPIOC->ODR |= GPIO_ODR_0; // Bring CS high
-	GYRO_Write(0xF,0x20);  // CTRL1: Data rate = 100Hz, BW = 12.5 Hz, XYZ enable, Power ON
-	GYRO_Write(0x80,0x22); // CTRL3: INT1 Interrupt enable
-	GYRO_Write(0x00,0x23); // CTRL4: 250 dps, continuous update
-	
-	// Average 500 readings to obtain the DC Offset
-	uint16_t counter = 500;
-	for(uint16_t i=0;i<counter;i++)
-	{
-		if(counter%20==0)GPIOB->ODR|=GPIO_ODR_5; // Blink LED during calibration
-		x_cal+=GYRO_Read_X(sensitivity_250);
-		y_cal+=GYRO_Read_Y(sensitivity_250);
-	}
-	x_cal/=500;
-	y_cal/=500;
+	GYRO_Write(0x08,0x22); // CTRL3: INT2/DRDY Interrupt enable
+	GYRO_Write(0x80,0x23); // CTRL4: 250 dps, Block Data Update (until MSB & LSB reading)
+	GYRO_Write(0x0F,0x20); // CTRL1: Data rate = 100Hz, BW = 12.5 Hz, XYZ enable, Power ON
 }
+void TIMER_Init(void)
+{
+	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+	RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
+	
+	// Timer1 - 4Hz
+	TIM1->CR1 = 0;
+	TIM1->CCMR1 = 0;
+	TIM1->CCMR2 = 0;
+	TIM1->CCER = 0;
+	TIM1->PSC = 65500;
+	TIM1->ARR = 300;
+	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC2M_Pos | TIM_CCMR1_OC2PE |0x3 << TIM_CCMR1_OC1M_Pos | TIM_CCMR1_OC1PE; // CH2 - TOGGLE MODE
+	TIM1->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P; // Output enabled for CH2/2N/3/3N
+	TIM1->BDTR |= TIM_BDTR_MOE;
+	TIM1->CCR1 = 0;
+	TIM1->CCR2 = 0;
+	
+	// Timer2 - 4Hz
+	TIM2->CR1 = 0;
+	TIM2->CCMR1 = 0;
+	TIM2->CCMR2 = 0;
+	TIM2->CCER = 0;
+	TIM2->PSC = 65500;
+	TIM2->ARR = 300;
+	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
+	TIM2->CCMR1 |= TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE; // Output compare pre-enable, enabled for ch1&2
+	TIM2->CCMR2 |= TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE; // Output compare pre-enable, enabled for ch3&4
+	TIM2->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC3E | TIM_CCER_CC4E;
+	TIM2->CCR1 = 0;
+	TIM2->CCR2 = 75;
+	TIM2->CCR3 = 150;
+	TIM2->CCR4 = 225;
+	//TIM2->CR1	|= TIM_CR1_CEN;
+	
+	// Timer3 - 4Hz
+	TIM3->CR1 = 0;
+	TIM3->CCMR1 = 0;
+	TIM3->CCER = 0;
+	TIM3->PSC = 65500;
+	TIM3->ARR = 300;
+	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos | TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE;
+	TIM3->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P;
+	TIM3->CCR1 = 150;
+	TIM3->CCR2 = 150;
 
+}
+void R_Forward(uint16_t speed)
+{
+	TIM2->CR1	&= ~TIM_CR1_CEN;
+
+	TIM2->PSC = (speed)*675;
+	TIM2->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM2->CCMR2 &= ~(TIM_CCMR2_OC3M_Msk | TIM_CCMR2_OC4M_Msk);
+	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
+	TIM2->CCR1 = 0;
+	TIM2->CCR2 = 75;
+	TIM2->CCR3 = 150; 
+	TIM2->CCR4 = 225;
+
+	TIM2->CR1	|= TIM_CR1_CEN;
+}
+void R_Reverse(uint16_t speed)
+{
+	TIM2->CR1	&= ~TIM_CR1_CEN;
+
+	TIM2->PSC = (speed)*675;
+	TIM2->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM2->CCMR2 &= ~(TIM_CCMR2_OC3M_Msk | TIM_CCMR2_OC4M_Msk);
+	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
+	TIM2->CCR1 = 225;
+	TIM2->CCR2 = 150;
+	TIM2->CCR3 = 75;
+	TIM2->CCR4 = 0;	
+
+	TIM2->CR1	|= TIM_CR1_CEN;
+}
+void L_Forward(uint16_t speed)
+{
+	TIM1->CR1	&= ~TIM_CR1_CEN;
+	TIM3->CR1	&= ~TIM_CR1_CEN;
+
+	TIM1->PSC = (speed)*8000;
+	TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM1->CCR1 = 150;
+	TIM1->CCR2 = 225;
+	TIM3->PSC = (speed)*8000;
+	TIM3->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM3->CCR1 = 0;
+	TIM3->CCR2 = 75;
+
+	TIM3->CR1	|= TIM_CR1_CEN;
+	TIM1->CR1	|= TIM_CR1_CEN;
+}
+void L_Reverse(uint16_t speed)
+{
+	TIM1->CR1	&= ~TIM_CR1_CEN;
+	TIM3->CR1	&= ~TIM_CR1_CEN;
+
+	TIM1->PSC = (speed)*8000;
+	TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM1->CCR1 = 75;
+	TIM1->CCR2 = 0;
+	TIM3->PSC = (speed)*8000;
+	TIM3->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM3->CCR1 = 225;
+	TIM3->CCR2 = 150;
+
+	TIM3->CR1	|= TIM_CR1_CEN;
+	TIM1->CR1	|= TIM_CR1_CEN;
+}
+void R_Stop(void)
+{
+	// This function stops all movement by setting each channel LOW for the entire counter sequence	
+	TIM2->CR1	&= ~TIM_CR1_CEN;
+	
+	TIM2->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM2->CCMR2 &= ~(TIM_CCMR2_OC3M_Msk | TIM_CCMR2_OC4M_Msk);
+	TIM2->CCMR1 |= 0x7 << TIM_CCMR1_OC1M_Pos | 0x7 << TIM_CCMR1_OC2M_Pos;
+	TIM2->CCMR2 |= 0x7 << TIM_CCMR2_OC3M_Pos | 0x7 << TIM_CCMR2_OC4M_Pos;
+	TIM2->CCR1 = 0;
+	TIM2->CCR2 = 0;
+	TIM2->CCR3 = 0;
+	TIM2->CCR4 = 0;
+
+	TIM2->CR1	|= TIM_CR1_CEN;
+}
+void L_Stop(void)
+{
+	TIM1->CR1	&= ~TIM_CR1_CEN;
+	TIM3->CR1	&= ~TIM_CR1_CEN;
+
+	TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM1->CCMR1 |= 0x7 << TIM_CCMR1_OC1M_Pos | 0x7 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM1->CCR1 = 0;
+	TIM1->CCR2 = 0;
+	TIM3->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
+	TIM3->CCMR1 |= 0x7 << TIM_CCMR1_OC1M_Pos | 0x7 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
+	TIM3->CCR1 = 0;
+	TIM3->CCR2 = 0;
+
+	TIM3->CR1	|= TIM_CR1_CEN;
+	TIM1->CR1	|= TIM_CR1_CEN;
+}
 float GYRO_Read_X(float sensitivity)
 {
 	float theta = 0;
-	int x_buff[3]={0,0,0};
-	uint16_t xdata = 0;
+	uint8_t x_buff[3]={0,0,0};
+	int16_t xdata = 0;
 	
 	GYRO_Read(x_buff,0x28,2);
 	xdata = (int16_t)( (uint16_t)(x_buff[2] << 8) + x_buff[1]);
@@ -201,10 +390,10 @@ float GYRO_Read_X(float sensitivity)
 float GYRO_Read_Y(float sensitivity)
 {
 	float theta = 0;
-	int y_buff[3]={0,0,0};
-	uint16_t ydata = 0;
+	uint8_t y_buff[3]={0,0,0};
+	int16_t ydata = 0;
 	
-	GYRO_Read(y_buff,0x28,2);
+	GYRO_Read(y_buff,0x2A,2);
 	ydata = (int16_t)( (uint16_t)(y_buff[2] << 8) + y_buff[1]);
 	
 	theta=(float)ydata/sensitivity;
@@ -212,81 +401,93 @@ float GYRO_Read_Y(float sensitivity)
 	return theta;
 }
 
-float GYRO_Read_Z(float sensitivity)
-{
-	float theta = 0;
-	int z_buff[3]={0,0,0};
-	uint16_t zdata = 0;
-	
-	GYRO_Read(z_buff,0x28,2);
-	zdata = (int16_t)( (uint16_t)(z_buff[2] << 8) + z_buff[1]);
-	
-	theta=(float)zdata/sensitivity;
-	
-	return theta;
-}
-
 void GYRO_Write(uint8_t TxData, uint8_t WriteAddr)
 {
   // SPI Transmission Step 1: Bring CS (serial port enable) LOW
-  SPI2->CR1 &= ~(SPI_CR1_SPE);
+  GPIOC->ODR &= ~(GPIO_ODR_0);
 	
 	// SPI Transmission Step 2: Format and transmit data
-  uint8_t cmd[2] = {0x00 | WriteAddr, TxData};
-	uint8_t *pData = cmd;
-	uint8_t count = 2;
-	
-  while(count > 0)
-	{
-		while(!(SPI2->SR & SPI_SR_TXE));
-		SPI2->DR = *pData;
-		pData += sizeof(uint8_t);
-		count--;
-	}
+  uint8_t cmd[2]= {(0x00 | WriteAddr),TxData};
+  HAL_SPI_Transmit(&hspi2,cmd,2,(uint32_t)0x1000);
+
 	// SPI Transmission Step 3: Bring CS (serial port enable) HIGH
-  SPI2->CR1 |= SPI_CR1_SPE;
+  GPIOC->ODR |= GPIO_ODR_0;
 }
 
-int* GYRO_Read(int* RxData,uint8_t ReadAddr, uint16_t Bytes)
+void GYRO_Read(uint8_t* RxData,uint8_t ReadAddr, uint16_t Bytes)
 {
   // SPI Transmission Step 1: Bring CS (serial port enable) LOW
-  SPI2->CR1 &= ~(SPI_CR1_SPE);
+  GPIOC->ODR &= ~(GPIO_ODR_0);
 
   // SPI Transmission Step 2: Format and read data
-	// Check TXE flag
-	while(!(SPI2->SR & SPI_SR_TXE));
-	SPI2->DR = 0xC | ReadAddr; // {Read, Master, Addr}
+	uint8_t cmd[1+Bytes];
+	cmd[0]= 0xC0 | ReadAddr;
 	
-	for(int i=0;i<Bytes;i++)
-	{
-		// Check RXNE flag
-		while(!(SPI2->SR & SPI_SR_RXNE));
-		RxData[i] = SPI2->DR;
-	}
+	for(int i = 1; i <= Bytes; i++)
+	  cmd[i] = 0x00;
+	
+	HAL_SPI_TransmitReceive(&hspi2,cmd,RxData,Bytes+1,(uint32_t)0x1000);
 	
   // SPI Transmission Step 3: Bring CS (serial port enable) HIGH
-  SPI2->CR1 |= SPI_CR1_SPE;
+  GPIOC->ODR |= GPIO_ODR_0;
 	
-	return RxData;
 }
 
-void processBTData(void){
-	if ((USART4->ISR & USART_ISR_RXNE) == USART_ISR_RXNE) //check if the ISR register is not empty
-	{
+void USART3_4_IRQHandler(void){
+	if(USART4->ISR & USART_ISR_RXNE){	// If RX interrupt...
 		dataChar = (uint8_t)(USART4->RDR); // Receive data, clear flag
 		data[i] = dataChar; //store char
 		if(dataChar==':'){
-			i=0;//reset index
-			left = data[1]-48;//set left speed
-			right = data[3]-48;//set right speed
+			i=0;
+			left = data[1]-48;
+			right = data[3]-48;
+			
+				if(left<4){
+					L_Reverse((left+1)*2);
+					GPIOC->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
+					GPIOC->ODR |= GPIO_ODR_7;
+				}
+				if(left>4){
+					L_Forward((9-left)*2);
+					GPIOC->ODR &= ~(GPIO_ODR_6 | GPIO_ODR_7);
+					GPIOC->ODR |= GPIO_ODR_6;
+				}
+				if(left==4){
+					L_Stop();
+					GPIOC->ODR |= GPIO_ODR_6 | GPIO_ODR_7;
+				}
+				if(right<4){
+					R_Reverse((right+1)*2);
+					GPIOC->ODR &= ~(GPIO_ODR_8 | GPIO_ODR_9);
+					GPIOC->ODR |= GPIO_ODR_9;
+				}
+				if(right>4){
+					R_Forward((9-right)*2);
+					GPIOC->ODR &= ~(GPIO_ODR_8 | GPIO_ODR_9);
+					GPIOC->ODR |= GPIO_ODR_8;
+				}
+				if(right==4){
+					R_Stop();
+					GPIOC->ODR |= GPIO_ODR_8 | GPIO_ODR_9;
+				}
 		}
 		else{
-			i++;//increment index
-		}	
+			i++;
+		}
 	}
 }
 
+/**
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
+void Error_Handler(void)
+{
+  /* USER CODE BEGIN Error_Handler_Debug */
+  /* User can add his own implementation to report the HAL error return state */
 
+  /* USER CODE END Error_Handler_Debug */
+}
 #ifdef  USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
