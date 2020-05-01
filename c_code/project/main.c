@@ -40,12 +40,25 @@ int main(void)
 	USART4_Init();
 	GYRO_Init();
 	TIMER_Init();
+	
 	uint8_t thresh = 10;
 	
+	// Get the address of the NEW DATA register in the GYRO
 	uint8_t status[1];
 	GYRO_Read(status,0x27,1);
+	
+//	for(int j=4000;j>0;j--)
+//	{
+//		R_Forward(j);
+//		if(j==400)while(1);
+//		HAL_Delay(1);
+//	}
+	
   while (1)
   {
+		// Only need 1 axis depending how board is oriented if used for self-balancing
+		// This iteration uses the GYRO as another controller for movement
+		
 		// New X-Data
 		if(*status & (1<<0)){
 			xdata = (int16_t)GYRO_Read_X(sensitivity_245);
@@ -54,7 +67,6 @@ int main(void)
 		if(*status & (1<<1)){
 			ydata = (int16_t)GYRO_Read_Y(sensitivity_245);
 		}
-	
 		// Falling Forward
 		if(xdata > thresh){
 			GPIOC->ODR &= ~(GPIO_ODR_8);
@@ -62,7 +74,6 @@ int main(void)
 			R_Forward(xdata);
 			L_Forward(xdata);
 		}
-
 		// Falling Backward
 		else if(xdata < -thresh){
 			GPIOC->ODR &= ~(GPIO_ODR_9);
@@ -70,7 +81,6 @@ int main(void)
 			R_Reverse(xdata*-1);
 			L_Reverse(xdata*-1);
 		}
-		
 		// Rotate Right
 		if(ydata > thresh){
 			GPIOC->ODR &= ~(GPIO_ODR_7);
@@ -78,7 +88,6 @@ int main(void)
 			R_Reverse(ydata);
 			L_Forward(ydata);
 		}
-		
 		// Rotate Left
 		else if(ydata < -thresh){
 			GPIOC->ODR &= ~(GPIO_ODR_6);
@@ -127,7 +136,7 @@ void SystemClock_Config(void)
 }
 void GPIO_Init(void)
 {
-	// Clock Enable: GPIOA/B/C
+	// Clock Enable: GPIO A/B/C
 	RCC->AHBENR |= RCC_AHBENR_GPIOAEN|RCC_AHBENR_GPIOBEN|RCC_AHBENR_GPIOCEN;
 
 //	// SPI2 - GYRO
@@ -138,9 +147,11 @@ void GPIO_Init(void)
 	GPIOC->MODER |= GPIO_MODER_MODER0_0| GPIO_MODER_MODER1_1;
 
 	// USART4 - BLUETOOTH
+	// PC10,11 (AF0)
 	GPIOC->MODER |= GPIO_MODER_MODER10_1 | GPIO_MODER_MODER11_1;
 	
 	// LEDs
+	// PC6/7/8/9 : Output, PP 
 	GPIOC->MODER |= GPIO_MODER_MODER6_0 | GPIO_MODER_MODER7_0 | GPIO_MODER_MODER8_0 | GPIO_MODER_MODER9_0;
 	
 	// TIM1
@@ -223,55 +234,70 @@ void GYRO_Init(void)
 }
 void TIMER_Init(void)
 {
-	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
-	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+	// Full-Step bipolar stepper motor driver
+	// Speed controlled by FREQUENCY which is set by PSC
+	// Timer 2 controls RIGHT MOTOR
+	//		+ CH 1/3 (coil 1), CH 2/4 (coil 2)
+	//    + CH1 = ~CH3, CH2 = ~CH4
+	// Timer 1/3 controls LEFT MOTOR
+	//		+ Timer 1
+	//				- CH1/2 (coil 1)
+	//				- CH1 = ~CH2
+	//		+ Timer 3
+	//				- CH1/2 (coil 2)
+	//				- CH1 = ~CH2
+	
+	RCC->APB1ENR |= RCC_APB1ENR_TIM2EN | RCC_APB1ENR_TIM3EN;
 	RCC->APB2ENR |= RCC_APB2ENR_TIM1EN;
 	
-	// Timer1 - 4Hz
+	// Timer1
 	TIM1->CR1 = 0;
 	TIM1->CCMR1 = 0;
 	TIM1->CCMR2 = 0;
 	TIM1->CCER = 0;
 	TIM1->PSC = 65500;
 	TIM1->ARR = 300;
-	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC2M_Pos | TIM_CCMR1_OC2PE |0x3 << TIM_CCMR1_OC1M_Pos | TIM_CCMR1_OC1PE; // CH2 - TOGGLE MODE
-	TIM1->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P; // Output enabled for CH2/2N/3/3N
+	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC2M_Pos | TIM_CCMR1_OC2PE |0x3 << TIM_CCMR1_OC1M_Pos | TIM_CCMR1_OC1PE; // CH1/2 - TOGGLE MODE
+	TIM1->CCER	|= TIM_CCER_CC2P;
+	TIM1->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E; // Output enabled for CH1/!CH2
 	TIM1->BDTR |= TIM_BDTR_MOE;
 	TIM1->CCR1 = 0;
 	TIM1->CCR2 = 0;
 	
-	// Timer2 - 4Hz
+	// Timer2
 	TIM2->CR1 = 0;
 	TIM2->CCMR1 = 0;
 	TIM2->CCMR2 = 0;
 	TIM2->CCER = 0;
-	TIM2->PSC = 65500;
+	TIM2->PSC = 1100;
 	TIM2->ARR = 300;
 	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
 	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
-	TIM2->CCMR1 |= TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE; // Output compare pre-enable, enabled for ch1&2
-	TIM2->CCMR2 |= TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE; // Output compare pre-enable, enabled for ch3&4
-	TIM2->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC3E | TIM_CCER_CC4E;
+	TIM2->CCMR1 |= TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE;
+	TIM2->CCMR2 |= TIM_CCMR2_OC3PE | TIM_CCMR2_OC4PE;
+	TIM2->CCER	|= TIM_CCER_CC4P | TIM_CCER_CC2P;
+	TIM2->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E| TIM_CCER_CC3E | TIM_CCER_CC4E;
 	TIM2->CCR1 = 0;
-	TIM2->CCR2 = 75;
-	TIM2->CCR3 = 150;
-	TIM2->CCR4 = 225;
-	//TIM2->CR1	|= TIM_CR1_CEN;
+	TIM2->CCR2 = 0;
+	TIM2->CCR3 = 0;
+	TIM2->CCR4 = 0;
 	
-	// Timer3 - 4Hz
+	// Timer3
 	TIM3->CR1 = 0;
 	TIM3->CCMR1 = 0;
 	TIM3->CCER = 0;
 	TIM3->PSC = 65500;
 	TIM3->ARR = 300;
 	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos | TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE;
-	TIM3->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E | TIM_CCER_CC2P;
-	TIM3->CCR1 = 150;
-	TIM3->CCR2 = 150;
+	TIM3->CCER	|= TIM_CCER_CC2P;
+	TIM3->CCER	|= TIM_CCER_CC1E | TIM_CCER_CC2E;
+	TIM3->CCR1 = 0;
+	TIM3->CCR2 = 0;
 
 }
 void R_Forward(uint16_t speed)
 {
+	// SEQUENCE: CH1/2, CH3/4
 	TIM2->CR1	&= ~TIM_CR1_CEN;
 
 	TIM2->PSC = (speed)*675;
@@ -280,14 +306,15 @@ void R_Forward(uint16_t speed)
 	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
 	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
 	TIM2->CCR1 = 0;
-	TIM2->CCR2 = 75;
-	TIM2->CCR3 = 150; 
-	TIM2->CCR4 = 225;
+	TIM2->CCR2 = 0;
+	TIM2->CCR3 = 150;
+	TIM2->CCR4 = 150;
 
 	TIM2->CR1	|= TIM_CR1_CEN;
 }
 void R_Reverse(uint16_t speed)
 {
+	// SEQUENCE: CH3/4, CH1/2
 	TIM2->CR1	&= ~TIM_CR1_CEN;
 
 	TIM2->PSC = (speed)*675;
@@ -295,46 +322,48 @@ void R_Reverse(uint16_t speed)
 	TIM2->CCMR2 &= ~(TIM_CCMR2_OC3M_Msk | TIM_CCMR2_OC4M_Msk);
 	TIM2->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
 	TIM2->CCMR2 |= 0x3 << TIM_CCMR2_OC3M_Pos | 0x3 << TIM_CCMR2_OC4M_Pos; // CH3&4 - TOGGLE MODE
-	TIM2->CCR1 = 225;
+	TIM2->CCR1 = 150;
 	TIM2->CCR2 = 150;
-	TIM2->CCR3 = 75;
+	TIM2->CCR3 = 0;
 	TIM2->CCR4 = 0;	
 
 	TIM2->CR1	|= TIM_CR1_CEN;
 }
 void L_Forward(uint16_t speed)
 {
+	// SEQUENCE: CH1/2(TIM3), CH1/2(TIM1)
 	TIM1->CR1	&= ~TIM_CR1_CEN;
 	TIM3->CR1	&= ~TIM_CR1_CEN;
 
-	TIM1->PSC = (speed)*8000;
+	TIM1->PSC = (speed)*675;
 	TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
 	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
 	TIM1->CCR1 = 150;
-	TIM1->CCR2 = 225;
-	TIM3->PSC = (speed)*8000;
+	TIM1->CCR2 = 150;
+	TIM3->PSC = (speed)*675;
 	TIM3->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
 	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
 	TIM3->CCR1 = 0;
-	TIM3->CCR2 = 75;
+	TIM3->CCR2 = 0;
 
 	TIM3->CR1	|= TIM_CR1_CEN;
 	TIM1->CR1	|= TIM_CR1_CEN;
 }
 void L_Reverse(uint16_t speed)
 {
+	// SEQUENCE: CH1/2(TIM1), CH1/2(TIM3)
 	TIM1->CR1	&= ~TIM_CR1_CEN;
 	TIM3->CR1	&= ~TIM_CR1_CEN;
 
-	TIM1->PSC = (speed)*8000;
+	TIM1->PSC = (speed)*675;
 	TIM1->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
 	TIM1->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
-	TIM1->CCR1 = 75;
+	TIM1->CCR1 = 0;
 	TIM1->CCR2 = 0;
-	TIM3->PSC = (speed)*8000;
+	TIM3->PSC = (speed)*675;
 	TIM3->CCMR1 &= ~(TIM_CCMR1_OC1M_Msk | TIM_CCMR1_OC2M_Msk);
 	TIM3->CCMR1 |= 0x3 << TIM_CCMR1_OC1M_Pos | 0x3 << TIM_CCMR1_OC2M_Pos; // CH1&2 - TOGGLE MODE
-	TIM3->CCR1 = 225;
+	TIM3->CCR1 = 150;
 	TIM3->CCR2 = 150;
 
 	TIM3->CR1	|= TIM_CR1_CEN;
